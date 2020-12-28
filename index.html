@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Median-Cut Sampling</title>
+    <style>
+
+body {
+  background-color: #222;
+  color: #bbb;
+  font-family: sans-serif;
+  margin: 0;
+  padding-top: 0.7em;
+  position: absolute;
+  top: 0;
+  bottom: 2.1em;
+  left: 0;
+  right: 0;
+}
+label {
+  padding-left: 1em;
+}
+#file {
+  width: 20em;
+}
+#iterations {
+  width: 3em;
+}
+#view {
+  height: 100%;
+  margin-top: 0.7em;
+}
+
+    </style>
+  </head>
+  <body>
+    <p>
+      <label>EXR file: <input type=file id=file></label>
+      <label>Iterations: <input type=number id=iterations min=0 value=6> (Max. <span id=samples></span> sample<span id=samples_pl></span>)</label>
+      <label style='display: none'><input type=checkbox id=hemisphere checked=1>Hemisphere</label>
+      <label><input type=button id=apply value=Apply></label>
+    </p>
+    <p>
+      <label><input type=radio name=scene2d id=map checked=1>Mapped samples</label>
+      <label><input type=radio name=scene2d id=lit>Lit sphere</label>
+      <label><input type=radio name=scene2d id=env>Envmap sphere</label>
+      <label>Dimmer: <input type=range id=dim min=0 max=1 step=any value=1></label>
+    </p>
+    <div id=view></div>
+    <script type=module>
+
+import * as THREE from 'https://unpkg.com/three/build/three.module.js'
+import {EXRLoader} from 'https://unpkg.com/three/examples/jsm/loaders/EXRLoader.js'
+import {OrbitControls} from 'https://unpkg.com/three/examples/jsm/controls/OrbitControls.js'
+
+const ui = {}
+for (const id of ['file', 'iterations', 'samples', 'samples_pl', 'hemisphere', 'apply', 'map', 'lit', 'env', 'dim', 'view']) {
+  ui[id] = document.getElementById(id)
+}
+
+let iterations, samples
+ui.iterations.addEventListener('input', calc_samples)
+function calc_samples() {
+  iterations = Math.round(ui.iterations.value)
+  samples = Math.pow(2, iterations)
+  ui.iterations.value = iterations
+  ui.samples.innerText = samples
+  ui.samples_pl.innerText = samples>1 ? 's' : ''
+}
+calc_samples()
+
+const renderer = new THREE.WebGLRenderer()
+renderer.outputEncoding = THREE.sRGBEncoding
+renderer.physicallyCorrectLights = true
+ui.view.appendChild(renderer.domElement)
+
+const scene2d = new THREE.Scene()
+scene2d.background = new THREE.Color(0x222222)
+
+const camera2d = new THREE.OrthographicCamera(0, 1, 1, 0, -4, 4)
+camera2d.position.z = 3
+
+const plane = new THREE.Mesh(new THREE.PlaneBufferGeometry(2, 2))
+// Since the above makes a plane ranging from -1 to 1, we force any negative coordinate to be 0.
+plane.geometry.attributes.position.array.forEach((value, i, array) => {
+  if (value < 0) {
+    array[i] = 0
+  }
+})
+scene2d.add(plane)
+
+const points = new THREE.Points(new THREE.BufferGeometry, [new THREE.PointsMaterial({color: 0x000000, size: 5}), new THREE.PointsMaterial({color: 0xffffff, size: 3, vertexColors: true})])
+points.geometry.addGroup(0, Infinity, 0)
+points.geometry.addGroup(0, Infinity, 1)
+points.position.set(0.5, 0.5, 2)
+scene2d.add(points)
+
+const lines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({color: 0x020202}))
+lines.position.z = 1
+scene2d.add(lines)
+
+const scene3d = new THREE.Scene()
+const camera3d = new THREE.PerspectiveCamera(40)
+const material = new THREE.MeshStandardMaterial()
+
+const sphere = new THREE.Mesh(new THREE.SphereBufferGeometry(1, 60, 40), material)
+scene3d.add(sphere)
+
+const floor = new THREE.Mesh(new THREE.PlaneBufferGeometry(40, 40), material)
+floor.rotation.x = -Math.PI / 2
+floor.position.y = -1
+scene3d.add(floor)
+floor.visible = false
+
+const lights = new THREE.Group()
+scene3d.add(lights)
+
+let scene_mode = 0
+const controls = new OrbitControls(camera2d, renderer.domElement)
+controls.addEventListener('change', render)
+const default_buttons = controls.mouseButtons
+const default_touches = controls.touches
+
+function render() {
+  renderer.render(scene_mode?scene3d:scene2d, scene_mode?camera3d:camera2d)
+}
+
+window.addEventListener('resize', () => {
+  resize()
+  render()
+})
+function resize() {
+  renderer.setSize(view.clientWidth, view.clientHeight)
+  const vratio = view.clientWidth / view.clientHeight
+  const pratio = plane.scale.x / plane.scale.y
+  camera2d.right = vratio>pratio ? plane.scale.y*vratio : plane.scale.x
+  camera2d.top = vratio>pratio ? plane.scale.y : plane.scale.x/vratio
+  camera2d.updateProjectionMatrix()
+  camera3d.aspect = vratio
+  camera3d.updateProjectionMatrix()
+}
+resize()
+
+ui.map.addEventListener('change', change_mode)
+ui.lit.addEventListener('change', change_mode)
+ui.env.addEventListener('change', change_mode)
+const dimmers = [1, 1, 1]
+const state = {position: new THREE.Vector3(0, 3, 8), target: new THREE.Vector3(), zoom: 1}
+function change_mode() {
+  dimmers[scene_mode] = ui.dim.value
+  scene_mode = ui.map.checked ? 0 : (ui.lit.checked ? 1 : 2)
+  ui.dim.value = dimmers[scene_mode]
+  if ((controls.object==camera2d && scene_mode) || (controls.object==camera3d && !scene_mode)) {
+    if (state) {
+      controls.position0.copy(state.position)
+      controls.target0.copy(state.target)
+      controls.zoom0 = state.zoom
+    }
+    state.position.copy(controls.object.position)
+    state.target.copy(controls.target)
+    state.zoom = controls.object.zoom
+    controls.object = scene_mode ? camera3d : camera2d
+    controls.reset()
+  }
+  controls.enableRotate = scene_mode ? true : false
+  controls.mouseButtons = scene_mode ? default_buttons : {LEFT: THREE.MOUSE.PAN}
+  controls.touches = scene_mode ? default_touches : {ONE: THREE.TOUCH.DOLLY_PAN}
+  dim()
+}
+
+ui.dim.addEventListener('input', dim)
+function dim() {
+  const v = plane.material.map ? Math.pow(ui.dim.value, 2.2) : 0
+  plane.material.color = new THREE.Color(v, v, v)
+  lights.children.forEach(l => {
+    l.intensity = scene_mode==1 ? v : 0
+  })
+  material.envMapIntensity = scene_mode==2 ? v : 0
+  render()
+}
+
+function cleanup() {
+  plane.material.map = null
+  plane.material.needsUpdate = true
+  points.geometry.setDrawRange(0, 0)
+  lines.geometry.setDrawRange(0, 0)
+  lights.clear()
+}
+cleanup()
+change_mode()
+
+const reader = new FileReader()
+const loader = new EXRLoader(THREE.DefaultLoadingManager)
+const pmrem = new THREE.PMREMGenerator(renderer)
+pmrem.compileEquirectangularShader()
+let image
+reader.addEventListener('load', () => {
+  loader.load(reader.result, exr => {
+    image = exr.image
+    exr.magFilter = THREE.NearestFilter
+
+    switch (exr.format) {
+      case THREE.RGBAFormat:
+        image.data = image.data.filter((_, i) => {
+          return i%4 != 3
+        })
+        break
+      // TODO: Add more. Might need to handle bit depth too.
+    }
+    exr.format = THREE.RGBFormat
+
+    plane.scale.set(image.width, image.height, 1)
+    plane.material.map = exr
+    plane.material.needsUpdate = true
+
+    const bgtex = exr.clone()
+    bgtex.magFilter = THREE.LinearFilter
+    bgtex.mapping = THREE.EquirectangularReflectionMapping
+    scene3d.background = bgtex
+    scene3d.environment = pmrem.fromEquirectangular(exr).texture
+    resize()
+    dim()
+
+    let regions = [{start: {x: 0, y: 0}, end: {x: image.width, y: image.height}, light: {x: null, y: image.width/2, r: Infinity, g: Infinity, b: Infinity}}]
+    for (let i=0; i<=iterations; i++) {
+      const sub = []
+      regions.forEach(r => {
+        const width = r.end.x - r.start.x
+        const height = r.end.y - r.start.y
+        if (r.light.x!== null && width==1 && height==1) {
+          sub.push(r)
+          return
+        }
+        const vert = (height*compens(r.start.y+height/2)) > width
+        const target = energy(r.light) * width * height / 2
+        const light = {x: null, y: null, r: 0, g: 0, b: 0}
+        const startu = vert ? r.start.y : r.start.x
+        let ene = 0
+        let maxe = 0
+        let u = startu
+        for (u; u<(vert?r.end.y:r.end.x); u++) {
+          const col = {r: 0, g: 0, b: 0}
+          let subl = 0
+          let subv = null
+          for (let v=vert?r.start.x:r.start.y; v<(vert?r.end.x:r.end.y); v++) {
+            const c = read(vert?v:u, vert?u:v)
+            col.r += c.r
+            col.g += c.g
+            col.b += c.b
+            const e = energy(c)
+            ene += e
+            if (e > subl) {
+              subl = e
+              subv = v
+            }
+          }
+          if (ene<target || u==startu) {
+            light.r += col.r
+            light.g += col.g
+            light.b += col.b
+            if (subl > maxe) {
+              maxe = subl
+              light.x = vert ? subv : u
+              light.y = vert ? u : subv
+            }
+          }
+          if (ene >= target) {
+            if (u == startu) {
+              u += 1
+            }
+            break
+          }
+        }
+        let factor = vert ? width*(u-r.start.y) : (u-r.start.x)*height
+        sub.push({start: {x: r.start.x, y: r.start.y}, end: {x: vert?r.end.x:u, y: vert?u:r.end.y}, light: {x: light.x, y: light.y, r: light.r/factor, g: light.g/factor, b: light.b/factor}})
+        if (r.light.x !== null) {
+          if (light.x==r.light.x && light.y==r.light.y) {
+            maxe = 0
+            for (let x=vert?r.start.x:u; x<r.end.x; x++) {
+              for (let y=vert?u:r.start.y; y<r.end.y; y++) {
+                const e = energy(read(x, y))
+                if (e > maxe) {
+                  maxe = e
+                  light.x = x
+                  light.y = y
+                }
+              }
+            }
+          } else {
+            light.x = r.light.x
+            light.y = r.light.y
+          }
+          factor = vert ? width*(r.end.y-u) : (r.end.x-u)*height
+          sub.push({start: {x: vert?r.start.x:u, y: vert?u:r.start.y}, end: {x: r.end.x, y: r.end.y}, light: {x: light.x, y: light.y, r: (width*height*r.light.r-light.r)/factor, g: (width*height*r.light.g-light.g)/factor, b: (width*height*r.light.b-light.b)/factor}})
+        }
+      })
+      regions = sub
+    }
+
+    regions.forEach(r => {
+      const ppos = points.geometry.attributes.position
+      const pcol = points.geometry.attributes.color
+      const lpos = lines.geometry.attributes.position
+      const p = points.geometry.drawRange.count
+      ppos.array[3*p] = r.light.x
+      ppos.array[3*p+1] = r.light.y
+      ppos.array[3*p+2] = 0
+      pcol.array[3*p] = r.light.r
+      pcol.array[3*p+1] = r.light.g
+      pcol.array[3*p+2] = r.light.b
+      const a = {x: r.end.x, y: r.start.y}
+      const b = {x: r.start.x, y: r.end.y}
+      for (const pos of [r.start, a, a, r.end, r.end, b, b, r.start]) {
+        const l = lines.geometry.drawRange.count
+        lpos.array[3*l] = pos.x
+        lpos.array[3*l+1] = pos.y
+        lpos.array[3*l+2] = 0
+        lines.geometry.setDrawRange(0, l+1)
+      }
+      ppos.needsUpdate = true
+      pcol.needsUpdate = true
+      lpos.needsUpdate = true
+      points.geometry.setDrawRange(0, p+1)
+      points.geometry.computeBoundingBox()
+      points.geometry.computeBoundingSphere()
+      lines.geometry.computeBoundingBox()
+      lines.geometry.computeBoundingSphere()
+      const e = energy(r.light)
+      const light = new THREE.DirectionalLight(new THREE.Color(r.light.r/regions.length/e, r.light.g/regions.length/e, r.light.b/regions.length/e))
+      light.position.setFromSphericalCoords(20, Math.PI*(1-r.light.y/image.height), 2*Math.PI*(0.75-r.light.x/image.width))
+      lights.add(light)
+      lights.add(new THREE.DirectionalLightHelper(light))
+    })
+    dim()
+    ui.apply.disabled = false
+  })
+})
+
+function compens(y) {
+  return Math.sin(Math.PI * y / image.height)
+}
+
+function energy(c) {
+  return 0.2126*c.r + 0.7152*c.g + 0.0722*c.b
+}
+
+function read(x, y) {
+  const p = 3 * (x + image.width*y)
+  const w = compens(y)
+  return {r: w*image.data[p], g: w*image.data[p+1], b: w*image.data[p+2]}
+}
+
+ui.apply.addEventListener('click', apply)
+function apply() {
+  ui.apply.disabled = true
+  points.geometry.setAttribute('position', new THREE.BufferAttribute(new Uint16Array(3 * samples), 3))
+  points.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(3 * samples), 3))
+  lines.geometry.setAttribute('position', new THREE.BufferAttribute(new Uint16Array(24 * samples), 3))
+  reader.readAsDataURL(ui.file.files[0])
+  cleanup()
+  render()
+}
+
+    </script>
+  </body>
+</html>
