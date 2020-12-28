@@ -52,6 +52,8 @@ import * as THREE from 'https://unpkg.com/three/build/three.module.js'
 import {EXRLoader} from 'https://unpkg.com/three/examples/jsm/loaders/EXRLoader.js'
 import {OrbitControls} from 'https://unpkg.com/three/examples/jsm/controls/OrbitControls.js'
 
+import {mediancut} from './lightgen.js'
+
 const ui = {}
 for (const id of ['file', 'iterations', 'samples', 'samples_pl', 'hemisphere', 'apply', 'map', 'lit', 'env', 'dim', 'view']) {
   ui[id] = document.getElementById(id)
@@ -220,96 +222,24 @@ reader.addEventListener('load', () => {
     resize()
     dim()
 
-    let regions = [{start: {x: 0, y: 0}, end: {x: image.width, y: image.height}, light: {x: null, y: image.width/2, r: Infinity, g: Infinity, b: Infinity}}]
-    for (let i=0; i<=iterations; i++) {
-      const sub = []
-      regions.forEach(r => {
-        const width = r.end.x - r.start.x
-        const height = r.end.y - r.start.y
-        if (r.light.x!== null && width==1 && height==1) {
-          sub.push(r)
-          return
-        }
-        const vert = (height*compens(r.start.y+height/2)) > width
-        const target = energy(r.light) * width * height / 2
-        const light = {x: null, y: null, r: 0, g: 0, b: 0}
-        const startu = vert ? r.start.y : r.start.x
-        let ene = 0
-        let maxe = 0
-        let u = startu
-        for (u; u<(vert?r.end.y:r.end.x); u++) {
-          const col = {r: 0, g: 0, b: 0}
-          let subl = 0
-          let subv = null
-          for (let v=vert?r.start.x:r.start.y; v<(vert?r.end.x:r.end.y); v++) {
-            const c = read(vert?v:u, vert?u:v)
-            col.r += c.r
-            col.g += c.g
-            col.b += c.b
-            const e = energy(c)
-            ene += e
-            if (e > subl) {
-              subl = e
-              subv = v
-            }
-          }
-          if (ene<target || u==startu) {
-            light.r += col.r
-            light.g += col.g
-            light.b += col.b
-            if (subl > maxe) {
-              maxe = subl
-              light.x = vert ? subv : u
-              light.y = vert ? u : subv
-            }
-          }
-          if (ene >= target) {
-            if (u == startu) {
-              u += 1
-            }
-            break
-          }
-        }
-        let factor = vert ? width*(u-r.start.y) : (u-r.start.x)*height
-        sub.push({start: {x: r.start.x, y: r.start.y}, end: {x: vert?r.end.x:u, y: vert?u:r.end.y}, light: {x: light.x, y: light.y, r: light.r/factor, g: light.g/factor, b: light.b/factor}})
-        if (r.light.x !== null) {
-          if (light.x==r.light.x && light.y==r.light.y) {
-            maxe = 0
-            for (let x=vert?r.start.x:u; x<r.end.x; x++) {
-              for (let y=vert?u:r.start.y; y<r.end.y; y++) {
-                const e = energy(read(x, y))
-                if (e > maxe) {
-                  maxe = e
-                  light.x = x
-                  light.y = y
-                }
-              }
-            }
-          } else {
-            light.x = r.light.x
-            light.y = r.light.y
-          }
-          factor = vert ? width*(r.end.y-u) : (r.end.x-u)*height
-          sub.push({start: {x: vert?r.start.x:u, y: vert?u:r.start.y}, end: {x: r.end.x, y: r.end.y}, light: {x: light.x, y: light.y, r: (width*height*r.light.r-light.r)/factor, g: (width*height*r.light.g-light.g)/factor, b: (width*height*r.light.b-light.b)/factor}})
-        }
-      })
-      regions = sub
-    }
+    const regions = mediancut(image.data, image.width, image.height, iterations)
 
     regions.forEach(r => {
       const ppos = points.geometry.attributes.position
       const pcol = points.geometry.attributes.color
       const lpos = lines.geometry.attributes.position
       const p = points.geometry.drawRange.count
-      ppos.array[3*p] = r.light.x
-      ppos.array[3*p+1] = r.light.y
+      ppos.array[3*p] = r.x
+      ppos.array[3*p+1] = r.y
       ppos.array[3*p+2] = 0
-      pcol.array[3*p] = r.light.r
-      pcol.array[3*p+1] = r.light.g
-      pcol.array[3*p+2] = r.light.b
-      const a = {x: r.end.x, y: r.start.y}
-      const b = {x: r.start.x, y: r.end.y}
-      for (const pos of [r.start, a, a, r.end, r.end, b, b, r.start]) {
+      pcol.array[3*p] = r.r
+      pcol.array[3*p+1] = r.g
+      pcol.array[3*p+2] = r.b
+      const a = {x: r.sx, y: r.sy}
+      const b = {x: r.ex, y: r.sy}
+      const c = {x: r.ex, y: r.ey}
+      const d = {x: r.sx, y: r.ey}
+      for (const pos of [a, b, b, c, c, d, d, a]) {
         const l = lines.geometry.drawRange.count
         lpos.array[3*l] = pos.x
         lpos.array[3*l+1] = pos.y
@@ -324,9 +254,9 @@ reader.addEventListener('load', () => {
       points.geometry.computeBoundingSphere()
       lines.geometry.computeBoundingBox()
       lines.geometry.computeBoundingSphere()
-      const e = energy(r.light)
-      const light = new THREE.DirectionalLight(new THREE.Color(r.light.r/regions.length/e, r.light.g/regions.length/e, r.light.b/regions.length/e))
-      light.position.setFromSphericalCoords(20, Math.PI*(1-r.light.y/image.height), 2*Math.PI*(0.75-r.light.x/image.width))
+      const e = energy(r)
+      const light = new THREE.DirectionalLight(new THREE.Color(r.r/regions.length/e, r.g/regions.length/e, r.b/regions.length/e))
+      light.position.setFromSphericalCoords(20, Math.PI*(1-r.y/image.height), 2*Math.PI*(0.75-r.x/image.width))
       lights.add(light)
       lights.add(new THREE.DirectionalLightHelper(light))
     })
@@ -335,18 +265,8 @@ reader.addEventListener('load', () => {
   })
 })
 
-function compens(y) {
-  return Math.sin(Math.PI * y / image.height)
-}
-
 function energy(c) {
   return 0.2126*c.r + 0.7152*c.g + 0.0722*c.b
-}
-
-function read(x, y) {
-  const p = 3 * (x + image.width*y)
-  const w = compens(y)
-  return {r: w*image.data[p], g: w*image.data[p+1], b: w*image.data[p+2]}
 }
 
 ui.apply.addEventListener('click', apply)
