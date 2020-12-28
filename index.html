@@ -72,7 +72,7 @@ calc_samples()
 
 const renderer = new THREE.WebGLRenderer()
 renderer.outputEncoding = THREE.sRGBEncoding
-renderer.physicallyCorrectLights = true
+// renderer.physicallyCorrectLights = true
 ui.view.appendChild(renderer.domElement)
 
 const scene2d = new THREE.Scene()
@@ -199,17 +199,6 @@ reader.addEventListener('load', () => {
   loader.load(reader.result, exr => {
     image = exr.image
     exr.magFilter = THREE.NearestFilter
-
-    switch (exr.format) {
-      case THREE.RGBAFormat:
-        image.data = image.data.filter((_, i) => {
-          return i%4 != 3
-        })
-        break
-      // TODO: Add more. Might need to handle bit depth too.
-    }
-    exr.format = THREE.RGBFormat
-
     plane.scale.set(image.width, image.height, 1)
     plane.material.map = exr
     plane.material.needsUpdate = true
@@ -254,8 +243,7 @@ reader.addEventListener('load', () => {
       points.geometry.computeBoundingSphere()
       lines.geometry.computeBoundingBox()
       lines.geometry.computeBoundingSphere()
-      const e = energy(r)
-      const light = new THREE.DirectionalLight(new THREE.Color(r.r/regions.length/e, r.g/regions.length/e, r.b/regions.length/e))
+      const light = new THREE.DirectionalLight(new THREE.Color(2*Math.PI*r.r, 2*Math.PI*r.g, 2*Math.PI*r.b))
       light.position.setFromSphericalCoords(20, Math.PI*(1-r.y/image.height), 2*Math.PI*(0.75-r.x/image.width))
       lights.add(light)
       lights.add(new THREE.DirectionalLightHelper(light))
@@ -264,10 +252,6 @@ reader.addEventListener('load', () => {
     ui.apply.disabled = false
   })
 })
-
-function energy(c) {
-  return 0.2126*c.r + 0.7152*c.g + 0.0722*c.b
-}
 
 ui.apply.addEventListener('click', apply)
 function apply() {

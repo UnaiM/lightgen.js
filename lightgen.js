@@ -21,7 +21,7 @@ export function mediancut(image, width, height, iterations) {
         return
       }
       const vert = (hei*compens(r.sy+hei/2)) > wid
-      const target = luminance(r) * wid * hei / 2
+      const target = luminance(r) * width * height / 2
       const light = {x: null, y: null, r: 0, g: 0, b: 0}
       const startu = vert ? r.sy : r.sx
       let lum = 0
@@ -60,8 +60,7 @@ export function mediancut(image, width, height, iterations) {
           break
         }
       }
-      let factor = vert ? wid*(u-r.sy) : (u-r.sx)*hei
-      sub.push({sx: r.sx, sy: r.sy, ex: vert?r.ex:u, ey: vert?u:r.ey, x: light.x, y: light.y, r: light.r/factor, g: light.g/factor, b: light.b/factor})
+      sub.push({sx: r.sx, sy: r.sy, ex: vert?r.ex:u, ey: vert?u:r.ey, x: light.x, y: light.y, r: light.r/width/height, g: light.g/width/height, b: light.b/width/height})
       if (r.x !== null) {
         if (light.x==r.x && light.y==r.y) {
           maxl = 0
@@ -79,8 +78,7 @@ export function mediancut(image, width, height, iterations) {
           light.x = r.x
           light.y = r.y
         }
-        factor = vert ? wid*(r.ey-u) : (r.ex-u)*hei
-        sub.push({sx: vert?r.sx:u, sy: vert?u:r.sy, ex: r.ex, ey: r.ey, x: light.x, y: light.y, r: (wid*hei*r.r-light.r)/factor, g: (wid*hei*r.g-light.g)/factor, b: (wid*hei*r.b-light.b)/factor})
+        sub.push({sx: vert?r.sx:u, sy: vert?u:r.sy, ex: r.ex, ey: r.ey, x: light.x, y: light.y, r: r.r-light.r/width/height, g: r.g-light.g/width/height, b: r.b-light.b/width/height})
       }
     })
     regions = sub
