@@ -1,3 +1,8 @@
+function luma(colour) {
+  // Rec.709 relative luminance of a colour.
+  return 0.2126*colour.r + 0.7152*colour.g + 0.0722*colour.b
+}
+
 export function mediancut(image, width, height, iterations) {
   // Implementation of A Median Cut Algorithm for Light Probe Sampling (Debevec 2006). Arguments:
   // - image: A typed array containing raw image data of an equirectangular environment map. Will only use first 3 channels (expecting RGB, horizontal stride).
@@ -9,94 +14,109 @@ export function mediancut(image, width, height, iterations) {
   // - r, g, b: Red, green and blue components of the light's colour, expressed as floating-point values such that (0, 0, 0) is black and (1, 1, 1) is white.
   // - sx, sy, ex, ey: Region of the image that the light represents, in pixels.
 
+  function read(array, channels, x, y) {
+    // Overflow protection for summed area table reads (also helps creating the table itself).
+    const result = {r: 0, g: 0, b: 0}
+    if (x>=0 && y>=0) {
+      const i = channels * (Math.min(width-1, x) + width*Math.min(height-1, y))
+      result.r = array[i]
+      result.g = array[i+1]
+      result.b = array[i+2]
+    }
+    return result
+  }
+
+  function compens(y) {
+    // Account for the pixel density differente along the equator/poles.
+    return Math.sin(Math.PI * y / height)
+  }
+
+  // Calculate number of channels in the image.
   const channels = image.length / width / height
-  let regions = [{sx: 0, sy: 0, ex: width, ey: height, x: null, y: width/2, r: Infinity, g: Infinity, b: Infinity}]
-  for (let i=0; i<=iterations; i++) {
+
+  // Summed Area Table
+  const sat = new Float64Array(3 * width * height)
+  for (let y=0; y<height; y++) {
+    const scan = {r: 0, g: 0, b: 0}
+    const weight = compens(y + 0.5)
+    for (let x=0; x<width; x++) {
+      const curr = read(image, channels, x, y)
+      const below = read(sat, 3, x, y-1)
+      const i = 3 * (x + width*y)
+      scan.r += weight * curr.r
+      scan.g += weight * curr.g
+      scan.b += weight * curr.b
+      sat[i] = below.r + scan.r
+      sat[i+1] = below.g + scan.g
+      sat[i+2] = below.b + scan.b
+    }
+  }
+
+  function split(region, vert) {
+    const target = luma(region) / 2
+
+    const offset = read(sat, 3, region.sx-1, region.sy-1)
+    const o = read(sat, 3, vert?region.ex:(region.sx-1), vert?(region.sy-1):region.ey)
+    offset.r -= o.r
+    offset.g -= o.g
+    offset.b -= o.b
+
+    // u is the coordinate we sweep the region along, which might be x or y depending on the region's aspect.
+    for (let u=vert?region.sy:region.sx; u<=(vert?region.ey:region.ex); u++) {
+      const curr = read(sat, 3, vert?region.ex:u, vert?u:region.ey)
+      const c = read(sat, 3, vert?(region.sx-1):u, vert?u:(region.sy-1))
+      curr.r += offset.r - c.r
+      curr.g += offset.g - c.g
+      curr.b += offset.b - c.b
+
+      if (luma(curr) >= target) {
+        u += 1
+        return {sx: region.sx, sy: region.sy, ex: vert?region.ex:u, ey: vert?u:region.ey, r: curr.r, g: curr.g, b: curr.b}
+      }
+    }
+  }
+
+  // Initialise with a single region representing the entire image.
+  let regions = [read(sat, 3, Infinity, Infinity)]
+  regions[0].sx = 0
+  regions[0].sy = 0
+  regions[0].ex = width
+  regions[0].ey = height
+
+  for (let i=0; i<iterations; i++) {
     const sub = []
-    regions.forEach(r => {
-      const wid = r.ex - r.sx
-      const hei = r.ey - r.sy
-      if (r.x!== null && wid==1 && hei==1) {
-        sub.push(r)
-        return
-      }
-      const vert = (hei*compens(r.sy+hei/2)) > wid
-      const target = luminance(r) * width * height / 2
-      const light = {x: null, y: null, r: 0, g: 0, b: 0}
-      const startu = vert ? r.sy : r.sx
-      let lum = 0
-      let maxl = 0
-      let u = startu
-      for (u; u<(vert?r.ey:r.ex); u++) {
-        const col = {r: 0, g: 0, b: 0}
-        let subl = 0
-        let subv = null
-        for (let v=vert?r.sx:r.sy; v<(vert?r.ex:r.ey); v++) {
-          const c = read(vert?v:u, vert?u:v)
-          col.r += c.r
-          col.g += c.g
-          col.b += c.b
-          const l = luminance(c)
-          lum += l
-          if (l > subl) {
-            subl = l
-            subv = v
-          }
-        }
-        if (lum<target || u==startu) {
-          light.r += col.r
-          light.g += col.g
-          light.b += col.b
-          if (subl > maxl) {
-            maxl = subl
-            light.x = vert ? subv : u
-            light.y = vert ? u : subv
-          }
-        }
-        if (lum >= target) {
-          if (u == startu) {
-            u += 1
-          }
-          break
-        }
-      }
-      sub.push({sx: r.sx, sy: r.sy, ex: vert?r.ex:u, ey: vert?u:r.ey, x: light.x, y: light.y, r: light.r/width/height, g: light.g/width/height, b: light.b/width/height})
-      if (r.x !== null) {
-        if (light.x==r.x && light.y==r.y) {
-          maxl = 0
-          for (let x=vert?r.sx:u; x<r.ex; x++) {
-            for (let y=vert?u:r.sy; y<r.ey; y++) {
-              const l = luminance(read(x, y))
-              if (l > maxl) {
-                maxl = l
-                light.x = x
-                light.y = y
-              }
-            }
-          }
-        } else {
-          light.x = r.x
-          light.y = r.y
-        }
-        sub.push({sx: vert?r.sx:u, sy: vert?u:r.sy, ex: r.ex, ey: r.ey, x: light.x, y: light.y, r: r.r-light.r/width/height, g: r.g-light.g/width/height, b: r.b-light.b/width/height})
+    regions.forEach(region => {
+      const wid = region.ex - region.sx
+      const hei = region.ey - region.sy
+
+      const vert = (hei*compens(region.sy+hei/2)) > wid
+
+      const spl = split(region, vert)
+      sub.push(spl)
+      const u = vert?spl.ey:spl.ex
+      if (u < (vert?region.ey:region.ex)) {
+        // XXX: Why doesn't a simple subtraction work as expected?
+        // sub.push({sx: vert?region.sx:u, sy: vert?u:region.sy, ex: region.ex, ey: region.ey, r: region.r-spl.r, g: region.g-spl.g, b: region.b-spl.b})
+        const tr = read(sat, 3, region.ex, region.ey)
+        const tl = read(sat, 3, (vert?region.sx:u)-1, region.ey)
+        const br = read(sat, 3, region.ex, (vert?u:region.sy)-1)
+        const bl = read(sat, 3, (vert?region.sx:u)-1, (vert?u:region.sy)-1)
+        sub.push({sx: vert?region.sx:u, sy: vert?u:region.sy, ex: region.ex, ey: region.ey, r: tr.r-tl.r-br.r+bl.r, g: tr.g-tl.g-br.g+bl.g, b: tr.b-tl.b-br.b+bl.b})
       }
     })
     regions = sub
   }
+
+  regions.forEach(region => {
+    // Find centroid. Vertically splitting the horizontally splitted region yields the same results as splitting the entire region in both ways. Don't ask me why, but it doesn't work the other way around.
+    const spl = split(split(region, false), true)
+    region.x = spl.ex
+    region.y = spl.ey
+
+    region.r /= width * height
+    region.g /= width * height
+    region.b /= width * height
+  })
+
   return regions
-
-  function compens(y) {
-    return Math.sin(Math.PI * y / height)
-  }
-
-  function read(x, y) {
-    const p = channels * (x + width*y)
-    const w = compens(y)
-    return {r: w*image[p], g: w*image[p+1], b: w*image[p+2]}
-  }
-}
-
-function luminance(c) {
-  // https://en.wikipedia.org/wiki/Relative_luminance
-  return 0.2126*c.r + 0.7152*c.g + 0.0722*c.b
 }

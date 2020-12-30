@@ -213,17 +213,22 @@ reader.addEventListener('load', () => {
 
     const regions = mediancut(image.data, image.width, image.height, iterations)
 
+    let factor = 0
+    regions.forEach(r => {
+      factor = Math.max(factor, r.r, r.g, r.b)
+    })
+
     regions.forEach(r => {
       const ppos = points.geometry.attributes.position
       const pcol = points.geometry.attributes.color
       const lpos = lines.geometry.attributes.position
       const p = points.geometry.drawRange.count
-      ppos.array[3*p] = r.x
-      ppos.array[3*p+1] = r.y
+      ppos.array[3*p] = Math.round(r.x)
+      ppos.array[3*p+1] = Math.round(r.y)
       ppos.array[3*p+2] = 0
-      pcol.array[3*p] = r.r
-      pcol.array[3*p+1] = r.g
-      pcol.array[3*p+2] = r.b
+      pcol.array[3*p] = r.r / factor
+      pcol.array[3*p+1] = r.g / factor
+      pcol.array[3*p+2] = r.b / factor
       const a = {x: r.sx, y: r.sy}
       const b = {x: r.ex, y: r.sy}
       const c = {x: r.ex, y: r.ey}
