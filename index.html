@@ -35,8 +35,8 @@ label {
   <body>
     <p>
       <label>EXR file: <input type=file id=file></label>
-      <label>Iterations: <input type=number id=iterations min=0 value=6> (Max. <span id=samples></span> sample<span id=samples_pl></span>)</label>
-      <label style='display: none'><input type=checkbox id=hemisphere checked=1>Hemisphere</label>
+      <label>Iterations: <input type=number id=iterations min=0 value=4> (Max. <span id=samples></span> sample<span id=samples_pl></span>)</label>
+      <label><input type=checkbox id=hemisphere checked=1>Hemisphere</label>
       <label><input type=button id=apply value=Apply></label>
     </p>
     <p>
@@ -195,9 +195,19 @@ const loader = new EXRLoader(THREE.DefaultLoadingManager)
 const pmrem = new THREE.PMREMGenerator(renderer)
 pmrem.compileEquirectangularShader()
 let image
+let hemisphere
 reader.addEventListener('load', () => {
   loader.load(reader.result, exr => {
     image = exr.image
+    if (hemisphere) {
+      const channels = image.data.length / image.width / image.height
+      const mid = Math.floor(image.height / 2)
+      image.data.forEach((_, i) => {
+        if (Math.floor(i / channels / image.width) < mid) {
+          image.data[i] = 0
+        }
+      })
+    }
     exr.magFilter = THREE.NearestFilter
     plane.scale.set(image.width, image.height, 1)
     plane.material.map = exr
@@ -211,7 +221,7 @@ reader.addEventListener('load', () => {
     resize()
     dim()
 
-    const regions = mediancut(image.data, image.width, image.height, iterations)
+    const regions = mediancut(image.data, image.width, image.height, iterations, hemisphere)
 
     let factor = 0
     regions.forEach(r => {
@@ -261,6 +271,7 @@ reader.addEventListener('load', () => {
 ui.apply.addEventListener('click', apply)
 function apply() {
   ui.apply.disabled = true
+  hemisphere = ui.hemisphere.checked
   points.geometry.setAttribute('position', new THREE.BufferAttribute(new Uint16Array(3 * samples), 3))
   points.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(3 * samples), 3))
   lines.geometry.setAttribute('position', new THREE.BufferAttribute(new Uint16Array(24 * samples), 3))
