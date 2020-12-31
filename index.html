@@ -74,6 +74,7 @@ const renderer = new THREE.WebGLRenderer()
 renderer.outputEncoding = THREE.sRGBEncoding
 // renderer.physicallyCorrectLights = true
 renderer.shadowMap.enabled = true
+renderer.shadowMap.type = THREE.PCFSoftShadowMap
 ui.view.appendChild(renderer.domElement)
 
 const scene2d = new THREE.Scene()
@@ -262,7 +263,15 @@ reader.addEventListener('load', () => {
       lines.geometry.computeBoundingSphere()
       const light = new THREE.DirectionalLight(new THREE.Color(2*Math.PI*r.r, 2*Math.PI*r.g, 2*Math.PI*r.b))
       light.castShadow = hemisphere
-      light.position.setFromSphericalCoords(20, Math.PI*(1-r.y/image.height), 2*Math.PI*(0.75-r.x/image.width))
+      light.position.setFromSphericalCoords(900, Math.PI*(1-r.y/image.height), 2*Math.PI*(0.75-r.x/image.width))
+      light.shadow.camera.top = 2
+      light.shadow.camera.bottom = -2
+      light.shadow.camera.left = -2
+      light.shadow.camera.right = 2
+      light.shadow.camera.near = 890
+      light.shadow.camera.far = 910
+      light.shadow.mapSize = new THREE.Vector2(16, 16)
+      light.shadow.bias = 0.1
       lights.add(light)
       lights.add(new THREE.DirectionalLightHelper(light))
     })
