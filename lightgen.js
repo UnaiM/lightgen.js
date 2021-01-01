@@ -116,6 +116,8 @@ export function mediancut(image, width, height, iterations, hemisphere) {
     const spl = split(split(region, false), true)
     region.x = spl.ex - 1
     region.y = spl.ey - 1
+    region.rx = region.x / width
+    region.ry = region.y / height
 
     region.r /= width * height
     region.g /= width * height

@@ -53,6 +53,7 @@ import {EXRLoader} from 'https://unpkg.com/three/examples/jsm/loaders/EXRLoader.
 import {OrbitControls} from 'https://unpkg.com/three/examples/jsm/controls/OrbitControls.js'
 
 import {mediancut} from './lightgen.js'
+import {regions2lights} from './lightgen_three.js'
 
 const ui = {}
 for (const id of ['file', 'iterations', 'samples', 'samples_pl', 'hemisphere', 'apply', 'map', 'lit', 'env', 'dim', 'view']) {
@@ -225,6 +226,10 @@ reader.addEventListener('load', () => {
     dim()
 
     const regions = mediancut(image.data, image.width, image.height, iterations, hemisphere)
+    regions2lights(regions, lights, 900, 2, 20, 16, 0.1)
+    lights.children.forEach(light => {
+      lights.add(new THREE.DirectionalLightHelper(light))
+    })
 
     let factor = 0
     regions.forEach(r => {
@@ -261,19 +266,6 @@ reader.addEventListener('load', () => {
       points.geometry.computeBoundingSphere()
       lines.geometry.computeBoundingBox()
       lines.geometry.computeBoundingSphere()
-      const light = new THREE.DirectionalLight(new THREE.Color(2*Math.PI*r.r, 2*Math.PI*r.g, 2*Math.PI*r.b))
-      light.castShadow = hemisphere
-      light.position.setFromSphericalCoords(900, Math.PI*(1-r.y/image.height), 2*Math.PI*(0.75-r.x/image.width))
-      light.shadow.camera.top = 2
-      light.shadow.camera.bottom = -2
-      light.shadow.camera.left = -2
-      light.shadow.camera.right = 2
-      light.shadow.camera.near = 890
-      light.shadow.camera.far = 910
-      light.shadow.mapSize = new THREE.Vector2(16, 16)
-      light.shadow.bias = 0.1
-      lights.add(light)
-      lights.add(new THREE.DirectionalLightHelper(light))
     })
     dim()
     ui.apply.disabled = false
