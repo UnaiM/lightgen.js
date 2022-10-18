@@ -1,4 +1,4 @@
-import * as THREE from 'https://unpkg.com/three/build/three.module.js'
+import * as THREE from 'https://unpkg.com/three@0.124.0/build/three.module.js'
 
 export function regions2lights(regions, group, radius, mapradius, clipdistance, mapsize, bias) {
   // Creates a dome of directional lights based on regions of an environment map. Arguments:
